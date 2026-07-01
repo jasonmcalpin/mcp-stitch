@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { DEFAULT_STITCH_API_BASE_URL, getStitchConfig } from "../config/stitch.js";
+import { getPackageInfo } from "../packageInfo.js";
 
 function isConfigured(name: string): boolean {
   return Boolean(process.env[name]?.trim());
@@ -16,6 +17,34 @@ function optionalText(name: string, fallback: string): string {
 
 export function registerStitchStatusTool(server: McpServer) {
   server.registerTool(
+    "stitch_info",
+    {
+      description:
+        "Reports the running mcp-stitch package name and version without checking Stitch API configuration.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const packageInfo = getPackageInfo();
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: [
+              "Stitch MCP info",
+              "",
+              `- name: ${packageInfo.name}`,
+              `- version: ${packageInfo.version}`,
+              "- transport: stdio",
+              "- package command: npx -y mcp-stitch",
+            ].join("\n"),
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerTool(
     "stitch_status",
     {
       description:
@@ -25,9 +54,14 @@ export function registerStitchStatusTool(server: McpServer) {
     async () => {
       const config = getStitchConfig();
       const hasProjectRoot = isConfigured("PROJECT_ROOT");
+      const packageInfo = getPackageInfo();
 
       const lines = [
         "Stitch setup status",
+        "",
+        "Package:",
+        `- name: ${packageInfo.name}`,
+        `- version: ${packageInfo.version}`,
         "",
         "Required configuration:",
         `- GOOGLE_API_KEY: ${configuredText("GOOGLE_API_KEY")}`,

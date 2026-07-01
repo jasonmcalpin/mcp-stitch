@@ -51,6 +51,8 @@ npx -y mcp-stitch
 
 You normally do not run that command directly in a terminal. Add it to your MCP client configuration as shown below.
 
+After the server starts, ask your agent to call `stitch_info` to confirm the installed package version, or `stitch_status` to check required environment variables.
+
 ## Environment
 
 Required:
@@ -377,6 +379,7 @@ Keep this in your local Codex config if it contains a real API key.
 ## Tools
 
 - `stitch_status`
+- `stitch_info`
 - `stitch_list_projects`
 - `stitch_get_project`
 - `stitch_create_project`

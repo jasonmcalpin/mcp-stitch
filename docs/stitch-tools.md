@@ -25,26 +25,30 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
 - Checks Stitch MCP setup and reports missing required, recommended, and optional environment variables without exposing secret values.
 - Input: none
 
-2. stitch_list_projects
+2. stitch_info
+- Reports the running mcp-stitch package name, package version, transport, and npx command.
+- Input: none
+
+3. stitch_list_projects
 - Lists Stitch projects.
 - Input:
   - filter (optional)
   - rawInput (optional override for exact Stitch request shape)
 
-3. stitch_get_project
+4. stitch_get_project
 - Gets one project.
 - Input:
   - projectId (optional if rawInput used; bare id or projects/{id}, normalized to full resource name)
   - rawInput (optional)
 
-4. stitch_list_screens
+5. stitch_list_screens
 - Lists screens in a project.
 - Response is formatted as a handoff inventory with title, bare `screenId`, full `screenName`, dimensions, and whether screenshot/HTML URLs are present.
 - Input:
   - projectId (optional if rawInput used; bare id or projects/{id}, normalized to bare id)
   - rawInput (optional)
 
-5. stitch_get_screen
+6. stitch_get_screen
 - Gets one screen.
 - Response highlights the bare `screenId`, full `screenName`, next `stitch_get_screen` call shape, `screenshot.downloadUrl`, and `htmlCode.downloadUrl` when present.
 - Input:
@@ -52,7 +56,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - projectId (optional; bare id or projects/{id}, used with bare screenId or partial title/name lookup)
   - rawInput (optional)
 
-6. stitch_generate_screen_from_text
+7. stitch_generate_screen_from_text
 - Generates a screen from text.
 - Response uses the same asset handoff format as `stitch_get_screen`, so agents can pass the returned bare `screenId` directly into later screen tools.
 - Input:
@@ -60,7 +64,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - projectId (required unless rawInput used; bare id preferred; projects/{id} is normalized by the adapter)
   - rawInput (optional)
 
-7. stitch_export_screen_artifact
+8. stitch_export_screen_artifact
 - Exports a screen artifact bundle under PROJECT_ROOT, with STITCH_OUTPUT_DIR as fallback when PROJECT_ROOT is unset.
 - Input:
   - screenData (optional direct payload to export)
@@ -71,14 +75,14 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - artifactName (optional backward-compatible fallback)
   - relativePath (optional legacy bundle directory, treated like artifactPath)
 
-8. stitch_create_project
+9. stitch_create_project
 - MUTATING: creates a new Stitch project.
 - Input:
   - title (optional)
   - confirm (required true to execute)
   - rawInput (optional)
 
-9. stitch_edit_screens
+10. stitch_edit_screens
 - MUTATING: edits existing screens with a text prompt.
 - Input:
   - projectId (required unless rawInput used; bare id or projects/{id}, normalized to bare id)
@@ -89,7 +93,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - confirm (required true to execute)
   - rawInput (optional)
 
-10. stitch_generate_variants
+11. stitch_generate_variants
 - MUTATING: generates variants of existing screens.
 - Input:
   - projectId (required unless rawInput used; normalized to bare id)
@@ -104,7 +108,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - confirm (required true to execute)
   - rawInput (optional)
 
-11. stitch_upload_design_md
+12. stitch_upload_design_md
 - MUTATING: uploads base64-encoded DESIGN.md content to a project.
 - Input:
   - projectId (required unless rawInput used; normalized to bare id)
@@ -112,7 +116,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - confirm (required true to execute)
   - rawInput (optional)
 
-12. stitch_create_design_system
+13. stitch_create_design_system
 - MUTATING: creates a design system, optionally scoped to a project.
 - Input:
   - projectId (optional; normalized to bare id)
@@ -128,7 +132,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - confirm (required true to execute)
   - rawInput (optional)
 
-13. stitch_create_design_system_from_design_md
+14. stitch_create_design_system_from_design_md
 - MUTATING: creates a design system from an uploaded DESIGN.md screen instance.
 - Input:
   - projectId (required unless rawInput used; normalized to bare id)
@@ -139,7 +143,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - confirm (required true to execute)
   - rawInput (optional)
 
-14. stitch_update_design_system
+15. stitch_update_design_system
 - MUTATING: updates an existing design system.
 - Input:
   - name (required unless rawInput used; assets/{asset_id} or bare asset id, normalized to full asset resource name)
@@ -148,13 +152,13 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - confirm (required true to execute)
   - rawInput (optional)
 
-15. stitch_list_design_systems
+16. stitch_list_design_systems
 - Lists design systems. If projectId is omitted, Stitch lists global design systems.
 - Input:
   - projectId (optional; normalized to bare id)
   - rawInput (optional)
 
-16. stitch_apply_design_system
+17. stitch_apply_design_system
 - MUTATING: applies a design system to selected screen instances.
 - Input:
   - projectId (required unless rawInput used; normalized to bare id)

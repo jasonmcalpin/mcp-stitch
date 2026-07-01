@@ -9,10 +9,13 @@ import { registerStitchProjectTools } from "./tools/stitchProjects.js";
 import { registerStitchScreenTools } from "./tools/stitchScreens.js";
 import { registerStitchDesignSystemTools } from "./tools/stitchDesignSystems.js";
 import { registerStitchExportTool } from "./tools/stitchExport.js";
+import { getPackageInfo } from "./packageInfo.js";
+
+const packageInfo = getPackageInfo();
 
 const server = new McpServer({
-  name: "mcp-stitch",
-  version: "0.5.0",
+  name: packageInfo.name,
+  version: packageInfo.version,
 });
 
 registerStitchStatusTool(server);
