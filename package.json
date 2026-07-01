@@ -18,12 +18,14 @@
     "dist",
     "docs/stitch-tools.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/release.sh"
   ],
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "prepack": "npm run build",
+    "release": "bash scripts/release.sh",
     "start": "node dist/index.js"
   },
   "keywords": [

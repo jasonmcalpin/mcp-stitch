@@ -2,6 +2,26 @@
 
 MCP server for Google Stitch. It exposes Stitch project, screen, design-system, generation, edit, variant, and artifact export tools over stdio for VS Code and other MCP-compatible agents.
 
+## Contents
+
+- [Links](#links)
+- [Status](#status)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Environment](#environment)
+- [VS Code Setup](#vs-code-setup)
+- [Cursor Setup](#cursor-setup)
+- [Continue Setup](#continue-setup)
+- [Codex Setup](#codex-setup)
+- [Tools](#tools)
+- [Safety](#safety)
+- [Development](#development)
+- [Release Script](#release-script)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+- [Publishing Checklist](#publishing-checklist)
+
 ## Links
 
 - npm: https://www.npmjs.com/package/mcp-stitch
@@ -101,7 +121,123 @@ For local development before publishing, build this repo and point VS Code at th
 }
 ```
 
+Open the VS Code Command Palette with `Cmd+Shift+P` on macOS or `Ctrl+Shift+P` on Windows/Linux, then run `MCP: List Servers` to start or restart the server.
+
 After VS Code starts the server, ask your agent to call `stitch_status` to confirm the setup.
+
+## Cursor Setup
+
+In Cursor, open `Cursor Settings > MCP` and add a new server:
+
+- Name: `stitch`
+- Type / Transport: `stdio`
+- Command: `npx`
+- Arguments:
+  - `-y`
+  - `mcp-stitch`
+
+Environment variables:
+
+- `GOOGLE_API_KEY`: your Google API key
+- `PROJECT_ROOT`: absolute path to the project where artifacts should be exported
+
+Cursor may not expand VS Code variables like `${workspaceFolder}`, so use a real absolute path for `PROJECT_ROOT`, for example:
+
+```text
+/Users/you/Workspace/my-project
+```
+
+You can also use Cursor's MCP JSON config:
+
+```json
+{
+  "mcpServers": {
+    "stitch": {
+      "command": "npx",
+      "args": ["-y", "mcp-stitch"],
+      "env": {
+        "GOOGLE_API_KEY": "your-key-here",
+        "PROJECT_ROOT": "/absolute/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+After adding it, ask Cursor Agent to call `stitch_status`.
+
+## Continue Setup
+
+Continue supports MCP servers in Agent mode. One local setup option is to create a file like:
+
+```text
+.continue/mcpServers/stitch.yaml
+```
+
+Example:
+
+```yaml
+name: Stitch MCP
+version: 0.1.0
+schema: v1
+
+mcpServers:
+  - name: Stitch
+    type: stdio
+    command: npx
+    args:
+      - "-y"
+      - "mcp-stitch"
+    env:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      PROJECT_ROOT: /absolute/path/to/your/project
+```
+
+Use Continue's secrets or your local environment for `GOOGLE_API_KEY`; do not commit a literal key.
+
+## Codex Setup
+
+In the Codex app, add a new MCP server with the `+` button:
+
+- Name: `stitch`
+- Transport: `STDIO`
+- Command to launch: `npx`
+- Arguments:
+  - `-y`
+  - `mcp-stitch`
+
+Environment variables:
+
+- `GOOGLE_API_KEY`: your Google API key
+- `PROJECT_ROOT`: absolute path to the project where artifacts should be exported
+
+Codex may not expand VS Code variables like `${workspaceFolder}`, so use a real absolute path for `PROJECT_ROOT`, for example:
+
+```text
+/Users/you/Workspace/my-project
+```
+
+After adding the server, restart or reconnect it and ask Codex to call `stitch_status`.
+
+For Codex CLI or manual setup, add a stdio MCP server to your Codex config, usually:
+
+```text
+~/.codex/config.toml
+```
+
+Example:
+
+```toml
+[mcp_servers.stitch]
+command = "npx"
+args = ["-y", "mcp-stitch"]
+
+[mcp_servers.stitch.env]
+GOOGLE_API_KEY = "your-key-here"
+PROJECT_ROOT = "/absolute/path/to/your/project"
+```
+
+Keep this in your local Codex config if it contains a real API key.
 
 ## Tools
 
@@ -141,6 +277,22 @@ npm run build
 npm run dev
 ```
 
+## Release Script
+
+Maintainers can publish a release and push the matching Git commit/tag with:
+
+```bash
+npm run release
+```
+
+The script defaults to a patch release. You can pass another npm version bump:
+
+```bash
+npm run release -- minor
+```
+
+It runs `npm version`, builds, previews the npm package, asks for confirmation before publishing, then commits, tags, and pushes the release.
+
 ## Contributing
 
 Issues and pull requests are welcome. Please keep changes focused on the Stitch MCP server surface, avoid committing generated Stitch artifacts, and run:
@@ -163,9 +315,7 @@ ISC. See [LICENSE](LICENSE).
 ## Publishing Checklist
 
 ```bash
-npm run build
-npm pack --dry-run
-npm publish
+npm run release
 ```
 
 See [docs/stitch-tools.md](docs/stitch-tools.md) for detailed tool inputs and Stitch contract notes.
