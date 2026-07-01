@@ -1,6 +1,6 @@
 # mcp-stitch
 
-MCP server for Google Stitch. It exposes Stitch project, screen, design-system, generation, edit, variant, and artifact export tools over stdio for VS Code and other MCP-compatible agents.
+MCP server for Google Stitch. It lets agents generate and retrieve Stitch screens, then export them into local, versioned implementation bundles with HTML, screenshots, linked assets, prompts, source metadata, and build guidance.
 
 ## Contents
 
@@ -9,6 +9,7 @@ MCP server for Google Stitch. It exposes Stitch project, screen, design-system, 
 - [Requirements](#requirements)
 - [Install](#install)
 - [Environment](#environment)
+- [Agent Prompts](#agent-prompts)
 - [VS Code Setup](#vs-code-setup)
 - [Cursor Setup](#cursor-setup)
 - [Continue Setup](#continue-setup)
@@ -69,6 +70,49 @@ Optional:
 - `STITCH_OUTPUT_DIR`: fallback output root when `PROJECT_ROOT` is not set
 - `STITCH_TIMEOUT_MS`: defaults to `180000`
 - `STITCH_MAX_RETRIES`: defaults to `2`
+
+## Agent Prompts
+
+Use prompts like these after your MCP client is configured.
+
+Create a new Stitch screen and export a local build bundle:
+
+```text
+Use mcp-stitch to create a desktop Stitch screen for a guest comments page.
+After it finishes, export the screen into a local artifact bundle with HTML, screenshot, linked assets, and rewritten local asset URLs.
+Use artifactPath ".artifacts/stitch/guest-comments" and versioned true.
+```
+
+Export assets from an existing Stitch screen:
+
+```text
+Use mcp-stitch to export screen {screenId} from project {projectId}.
+Save it to ".artifacts/stitch/{screen-name}" with versioned true.
+Include the HTML, screenshot, linked assets, and rewrite the HTML asset URLs to local files.
+```
+
+Find an existing screen first, then export it:
+
+```text
+Use mcp-stitch to list screens in project {projectId}.
+Find the screen whose title includes "{title or keyword}".
+Then export that screen as a local build bundle with includeLinkedAssets true, rewriteHtmlAssetUrls true, and versioned true.
+```
+
+Direct tool arguments for the export step:
+
+```json
+{
+  "projectId": "projects-or-bare-project-id",
+  "screenId": "screen-id-or-title-fragment",
+  "artifactPath": ".artifacts/stitch/guest-comments",
+  "versioned": true,
+  "includeHtml": true,
+  "includeScreenshot": true,
+  "includeLinkedAssets": true,
+  "rewriteHtmlAssetUrls": true
+}
+```
 
 ## VS Code Setup
 
