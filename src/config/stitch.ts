@@ -27,7 +27,7 @@ export function getStitchConfig(): StitchConfig {
   const apiKey = process.env.GOOGLE_API_KEY?.trim() ?? "";
   const baseUrl = process.env.STITCH_API_BASE_URL?.trim() || DEFAULT_STITCH_API_BASE_URL;
 
-  const timeoutMs = parsePositiveInt(process.env.STITCH_TIMEOUT_MS, 30000);
+  const timeoutMs = parsePositiveInt(process.env.STITCH_TIMEOUT_MS, 180000);
   const maxRetries = parsePositiveInt(process.env.STITCH_MAX_RETRIES, 2);
 
   const rawOutputDir = process.env.STITCH_OUTPUT_DIR?.trim();

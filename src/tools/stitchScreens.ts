@@ -4,7 +4,7 @@ import { getStitchConfig } from "../config/stitch.js";
 import { StitchClient } from "../services/stitchClient.js";
 import { toBareProjectId, toBareScreenId, toScreenIdentifier } from "../utils/stitchIds.js";
 import { resolveScreenInput } from "../utils/stitchScreenResolver.js";
-import { formatStitchSummary } from "../utils/stitchResponse.js";
+import { formatStitchSummary, safeJsonPreview } from "../utils/stitchResponse.js";
 import { compactStitchResult, requireConfirmation } from "../utils/stitchToolHelpers.js";
 
 function toErrorText(prefix: string, message: string): string {
@@ -51,6 +51,250 @@ const variantOptionsSchema = z
     variantCount: z.number().int().min(1).max(5).optional(),
   })
   .passthrough();
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getString(obj: Record<string, unknown> | null, key: string): string | undefined {
+  const value = obj?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function getProjectIdFromName(name?: string): string | undefined {
+  if (!name || !name.startsWith("projects/")) return undefined;
+  return name.split("/")[1];
+}
+
+function getScreenIdFromName(name?: string): string | undefined {
+  if (!name) return undefined;
+  const marker = "/screens/";
+  const index = name.indexOf(marker);
+  return index >= 0 ? name.slice(index + marker.length) : undefined;
+}
+
+function parseContentJson(payload: unknown): unknown | null {
+  const obj = asRecord(payload);
+  const content = obj?.content;
+  if (!Array.isArray(content)) return null;
+
+  for (const item of content) {
+    const text = getString(asRecord(item), "text");
+    if (!text) continue;
+
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function getStructuredPayload(payload: unknown): unknown {
+  const obj = asRecord(payload);
+  const structuredContent = obj?.structuredContent;
+  if (structuredContent && typeof structuredContent === "object") {
+    return structuredContent;
+  }
+
+  return parseContentJson(payload) ?? payload;
+}
+
+function screensFromPayload(payload: unknown): Record<string, unknown>[] {
+  const structured = getStructuredPayload(payload);
+  const direct = asRecord(structured);
+  if (!direct) return [];
+
+  const directScreens = direct.screens;
+  if (Array.isArray(directScreens)) {
+    return directScreens
+      .map((screen) => asRecord(screen))
+      .filter((screen): screen is Record<string, unknown> => Boolean(screen));
+  }
+
+  const outputComponents = direct.outputComponents;
+  const screens: Record<string, unknown>[] = [];
+  if (Array.isArray(outputComponents)) {
+    for (const component of outputComponents) {
+      const componentObj = asRecord(component);
+      const design = asRecord(componentObj?.design);
+      const designScreens = design?.screens;
+      if (!Array.isArray(designScreens)) continue;
+
+      for (const screen of designScreens) {
+        const screenObj = asRecord(screen);
+        if (screenObj) screens.push(screenObj);
+      }
+    }
+  }
+
+  const design = asRecord(direct.design);
+  const designScreens = design?.screens;
+  if (Array.isArray(designScreens)) {
+    for (const screen of designScreens) {
+      const screenObj = asRecord(screen);
+      if (screenObj) screens.push(screenObj);
+    }
+  }
+
+  return screens;
+}
+
+function firstScreenFromPayload(payload: unknown): Record<string, unknown> | null {
+  const structured = getStructuredPayload(payload);
+  const direct = asRecord(structured);
+  if (!direct) return null;
+
+  if (getString(direct, "name")?.includes("/screens/")) {
+    return direct;
+  }
+
+  const screens = screensFromPayload(payload);
+  if (screens.length > 0) {
+    return screens[0] ?? null;
+  }
+
+  return null;
+}
+
+function collectGenerationText(payload: unknown): string[] {
+  const structured = asRecord(getStructuredPayload(payload));
+  const outputComponents = structured?.outputComponents;
+  if (!Array.isArray(outputComponents)) return [];
+
+  const text: string[] = [];
+  for (const component of outputComponents) {
+    const componentObj = asRecord(component);
+    const summary = getString(componentObj, "text");
+    const suggestion = getString(componentObj, "suggestion");
+    if (summary) text.push(summary);
+    if (suggestion) text.push(`Suggestion: ${suggestion}`);
+  }
+
+  return text;
+}
+
+function hasUrl(record: Record<string, unknown> | null): string {
+  return getString(record, "downloadUrl") ? "yes" : "no";
+}
+
+function formatScreenListSummary(payload: unknown): string {
+  const screens = screensFromPayload(payload);
+
+  if (screens.length === 0) {
+    return formatStitchSummary({
+      title: "Stitch screens",
+      data: payload,
+      itemKeys: ["screens", "items", "results"],
+      idKeys: ["name", "id", "screenId", "title"],
+    });
+  }
+
+  const lines = ["Stitch screens", "", `Screen count: ${screens.length}`, ""];
+
+  screens.forEach((screen, index) => {
+    const name = getString(screen, "name");
+    const screenId = getString(screen, "id") ?? getScreenIdFromName(name) ?? "(none)";
+    const screenshot = asRecord(screen.screenshot);
+    const htmlCode = asRecord(screen.htmlCode);
+
+    lines.push(
+      `${index + 1}. ${getString(screen, "title") ?? "(untitled)"}`,
+      `- screenId: ${screenId}`,
+      `- screenName: ${name ?? "(none)"}`,
+      `- width: ${getString(screen, "width") ?? "(none)"}`,
+      `- height: ${getString(screen, "height") ?? "(none)"}`,
+      `- hasScreenshotUrl: ${hasUrl(screenshot)}`,
+      `- hasHtmlCodeUrl: ${hasUrl(htmlCode)}`,
+      `- htmlMimeType: ${getString(htmlCode, "mimeType") ?? "(none)"}`,
+      ""
+    );
+  });
+
+  lines.push(
+    "Tip:",
+    "- Pass the bare screenId to stitch_get_screen with projectId to get screenshot.downloadUrl and htmlCode.downloadUrl."
+  );
+
+  return lines.join("\n");
+}
+
+function formatScreenAssetSummary(title: string, payload: unknown): string {
+  const structured = getStructuredPayload(payload);
+  const structuredObj = asRecord(structured);
+  const screen = firstScreenFromPayload(payload);
+
+  if (!screen) {
+    return formatStitchSummary({
+      title,
+      data: payload,
+      itemKeys: ["screens", "nodes", "items"],
+      idKeys: ["name", "id", "screenId", "title"],
+    });
+  }
+
+  const screenshot = asRecord(screen.screenshot);
+  const htmlCode = asRecord(screen.htmlCode);
+  const metadata = asRecord(screen.screenMetadata);
+  const designSystem = asRecord(screen.designSystem);
+  const nestedDesignSystem = asRecord(designSystem?.designSystem);
+
+  const screenName = getString(screen, "name");
+  const screenId = getString(screen, "id") ?? getScreenIdFromName(screenName);
+  const projectId = getString(structuredObj, "projectId") ?? getProjectIdFromName(screenName);
+  const prompt = getString(screen, "prompt");
+  const generationText = collectGenerationText(payload);
+
+  const lines = [
+    title,
+    "",
+    "Screen:",
+    `- screenId: ${screenId ?? "(none)"}`,
+    `- screenName: ${screenName ?? "(none)"}`,
+    `- projectId: ${projectId ?? "(not present)"}`,
+    `- title: ${getString(screen, "title") ?? "(none)"}`,
+    `- sessionId: ${getString(structuredObj, "sessionId") ?? "(not present)"}`,
+    `- width: ${getString(screen, "width") ?? "(none)"}`,
+    `- height: ${getString(screen, "height") ?? "(none)"}`,
+    `- deviceType: ${getString(screen, "deviceType") ?? "(none)"}`,
+    `- generatedBy: ${getString(screen, "generatedBy") ?? "(not present)"}`,
+    `- screenType: ${getString(screen, "screenType") ?? "(not present)"}`,
+    `- status: ${getString(metadata, "status") ?? "(not present)"}`,
+    `- agentType: ${getString(metadata, "agentType") ?? "(not present)"}`,
+    "",
+    "Next calls:",
+    `- stitch_get_screen: { "projectId": "${projectId ?? "PROJECT_ID"}", "screenId": "${screenId ?? "SCREEN_ID"}" }`,
+    "",
+    "Screenshot asset:",
+    `- name: ${getString(screenshot, "name") ?? "(none)"}`,
+    `- downloadUrl: ${getString(screenshot, "downloadUrl") ?? "(none)"}`,
+    "",
+    "HTML/code asset:",
+    `- name: ${getString(htmlCode, "name") ?? "(none)"}`,
+    `- downloadUrl: ${getString(htmlCode, "downloadUrl") ?? "(none)"}`,
+    `- mimeType: ${getString(htmlCode, "mimeType") ?? "(none)"}`,
+    "",
+    "Design system:",
+    `- name: ${getString(designSystem, "name") ?? "(not present)"}`,
+    `- displayName: ${getString(nestedDesignSystem, "displayName") ?? "(not present)"}`,
+  ];
+
+  if (prompt) {
+    lines.push("", "Prompt:", safeJsonPreview(prompt, 800));
+  }
+
+  if (generationText.length > 0) {
+    lines.push("", "Generation notes:", ...generationText.map((item) => `- ${item}`));
+  }
+
+  lines.push("", "Raw preview:", safeJsonPreview(structured, 2000));
+
+  return lines.join("\n");
+}
 
 export function registerStitchScreenTools(server: McpServer) {
   server.registerTool(
@@ -101,12 +345,7 @@ export function registerStitchScreenTools(server: McpServer) {
         content: [
           {
             type: "text",
-            text: formatStitchSummary({
-              title: "Stitch screens",
-              data: result.data,
-              itemKeys: ["screens", "items", "results"],
-              idKeys: ["name", "id", "screenId", "title"],
-            }),
+            text: formatScreenListSummary(result.data),
           },
         ],
       };
@@ -311,12 +550,7 @@ export function registerStitchScreenTools(server: McpServer) {
         content: [
           {
             type: "text",
-            text: formatStitchSummary({
-              title: "Stitch screen",
-              data: result.data,
-              itemKeys: ["nodes", "components", "screens"],
-              idKeys: ["name", "id", "screenId", "title"],
-            }),
+            text: formatScreenAssetSummary("Stitch screen", result.data),
           },
         ],
       };
@@ -377,12 +611,7 @@ export function registerStitchScreenTools(server: McpServer) {
         content: [
           {
             type: "text",
-            text: formatStitchSummary({
-              title: "Stitch generated screen",
-              data: result.data,
-              itemKeys: ["screens", "nodes", "items"],
-              idKeys: ["name", "id", "screenId", "title"],
-            }),
+            text: formatScreenAssetSummary("Stitch generated screen", result.data),
           },
         ],
       };

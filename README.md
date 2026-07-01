@@ -12,6 +12,9 @@ MCP server for Google Stitch. It exposes Stitch project, screen, design-system, 
 - [VS Code Setup](#vs-code-setup)
 - [Cursor Setup](#cursor-setup)
 - [Continue Setup](#continue-setup)
+- [Claude Desktop Setup](#claude-desktop-setup)
+- [Claude Code CLI Setup](#claude-code-cli-setup)
+- [Gemini CLI Setup](#gemini-cli-setup)
 - [Codex Setup](#codex-setup)
 - [Tools](#tools)
 - [Safety](#safety)
@@ -62,7 +65,7 @@ Optional:
 
 - `STITCH_API_BASE_URL`: defaults to `https://stitch.googleapis.com/mcp`
 - `STITCH_OUTPUT_DIR`: fallback output root when `PROJECT_ROOT` is not set
-- `STITCH_TIMEOUT_MS`: defaults to `30000`
+- `STITCH_TIMEOUT_MS`: defaults to `180000`
 - `STITCH_MAX_RETRIES`: defaults to `2`
 
 ## VS Code Setup
@@ -195,6 +198,121 @@ mcpServers:
 
 Use Continue's secrets or your local environment for `GOOGLE_API_KEY`; do not commit a literal key.
 
+## Claude Desktop Setup
+
+Claude Desktop loads MCP servers from its desktop configuration file. On macOS, create or edit:
+
+```text
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+
+Add `mcp-stitch` under `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "stitch": {
+      "command": "npx",
+      "args": ["-y", "mcp-stitch"],
+      "env": {
+        "GOOGLE_API_KEY": "your-key-here",
+        "PROJECT_ROOT": "/absolute/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+If Claude Desktop cannot find `npx`, use the absolute path from `which npx` instead, for example:
+
+```json
+{
+  "mcpServers": {
+    "stitch": {
+      "command": "/opt/homebrew/bin/npx",
+      "args": ["-y", "mcp-stitch"],
+      "env": {
+        "GOOGLE_API_KEY": "your-key-here",
+        "PROJECT_ROOT": "/absolute/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+After saving the config, fully quit and reopen Claude Desktop. Then ask Claude to call `stitch_status` to confirm the setup.
+
+## Claude Code CLI Setup
+
+Claude Code can add stdio MCP servers from the terminal:
+
+```bash
+claude mcp add \
+  -e GOOGLE_API_KEY=your-key-here \
+  -e PROJECT_ROOT=/absolute/path/to/your/project \
+  stitch -- npx -y mcp-stitch
+```
+
+Then run:
+
+```bash
+claude mcp list
+```
+
+Start or restart Claude Code in your project and ask it to call `stitch_status`.
+
+## Gemini CLI Setup
+
+Gemini CLI can load MCP servers from user or workspace settings.
+
+For all Gemini CLI projects, create or edit:
+
+```text
+~/.gemini/settings.json
+```
+
+For just one workspace, create or edit:
+
+```text
+.gemini/settings.json
+```
+
+Add `mcp-stitch` under `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "stitch": {
+      "command": "npx",
+      "args": ["-y", "mcp-stitch"],
+      "env": {
+        "GOOGLE_API_KEY": "your-key-here",
+        "PROJECT_ROOT": "/absolute/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+If Gemini CLI cannot find `npx`, use the absolute path from `which npx` instead:
+
+```json
+{
+  "mcpServers": {
+    "stitch": {
+      "command": "/opt/homebrew/bin/npx",
+      "args": ["-y", "mcp-stitch"],
+      "env": {
+        "GOOGLE_API_KEY": "your-key-here",
+        "PROJECT_ROOT": "/absolute/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+Restart Gemini CLI after saving the settings. Inside Gemini CLI, run `/mcp` to list configured MCP servers and tools, then ask it to call `stitch_status`.
+
 ## Codex Setup
 
 In the Codex app, add a new MCP server with the `+` button:
@@ -219,7 +337,24 @@ Codex may not expand VS Code variables like `${workspaceFolder}`, so use a real 
 
 After adding the server, restart or reconnect it and ask Codex to call `stitch_status`.
 
-For Codex CLI or manual setup, add a stdio MCP server to your Codex config, usually:
+For Codex CLI, add the server from the terminal:
+
+```bash
+codex mcp add stitch \
+  --env GOOGLE_API_KEY=your-key-here \
+  --env PROJECT_ROOT=/absolute/path/to/your/project \
+  -- npx -y mcp-stitch
+```
+
+Then run:
+
+```bash
+codex mcp list
+```
+
+Start or restart Codex in your project and ask it to call `stitch_status`.
+
+For manual Codex CLI setup, add a stdio MCP server to your Codex config, usually:
 
 ```text
 ~/.codex/config.toml

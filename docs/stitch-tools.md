@@ -13,7 +13,7 @@ This server exposes Stitch project, screen, design-system, DESIGN.md import, gen
 ## Optional environment variables
 
 - STITCH_API_BASE_URL (default: https://stitch.googleapis.com/mcp)
-- STITCH_TIMEOUT_MS (default: 30000)
+- STITCH_TIMEOUT_MS (default: 180000)
 - STITCH_MAX_RETRIES (default: 2)
 - STITCH_OUTPUT_DIR (default: PROJECT_ROOT/stitch-output or cwd/stitch-output)
 
@@ -39,12 +39,14 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
 
 4. stitch_list_screens
 - Lists screens in a project.
+- Response is formatted as a handoff inventory with title, bare `screenId`, full `screenName`, dimensions, and whether screenshot/HTML URLs are present.
 - Input:
   - projectId (optional if rawInput used; bare id or projects/{id}, normalized to bare id)
   - rawInput (optional)
 
 5. stitch_get_screen
 - Gets one screen.
+- Response highlights the bare `screenId`, full `screenName`, next `stitch_get_screen` call shape, `screenshot.downloadUrl`, and `htmlCode.downloadUrl` when present.
 - Input:
   - screenId (optional if rawInput used; full projects/{id}/screens/{screen} path, or bare screen id when projectId is also provided)
   - projectId (optional; bare id or projects/{id}, used with bare screenId or partial title/name lookup)
@@ -52,6 +54,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
 
 6. stitch_generate_screen_from_text
 - Generates a screen from text.
+- Response uses the same asset handoff format as `stitch_get_screen`, so agents can pass the returned bare `screenId` directly into later screen tools.
 - Input:
   - prompt (required unless rawInput used)
   - projectId (required unless rawInput used; bare id preferred; projects/{id} is normalized by the adapter)
@@ -183,6 +186,7 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
       "projectId": "abc",
       "prompt": "Create a dashboard with KPI cards and a recent activity list"
     }
+  - Use the returned bare `screenId` with stitch_get_screen to retrieve the screen asset URLs again later.
 
 - Export a fetched screen:
   - call stitch_export_screen_artifact with {

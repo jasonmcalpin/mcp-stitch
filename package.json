@@ -1,6 +1,6 @@
 {
   "name": "mcp-stitch",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "MCP server for Google Stitch.",
   "main": "dist/index.js",
   "bin": {
