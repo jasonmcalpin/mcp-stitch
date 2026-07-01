@@ -1,0 +1,40 @@
+{
+  "name": "mcp-stitch",
+  "version": "0.1.0",
+  "description": "MCP server for Google Stitch.",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-stitch": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "docs/stitch-tools.md",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "prepack": "npm run build",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "stitch",
+    "google-stitch",
+    "vscode"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
