@@ -74,6 +74,13 @@ Mutating tools are marked `MUTATING` and require `confirm: true`. Without confir
   - artifactPath (optional workspace-relative bundle directory, for example `.artifacts/features/settings/design`)
   - artifactName (optional backward-compatible fallback)
   - relativePath (optional legacy bundle directory, treated like artifactPath)
+  - versioned (optional, default false; writes into the next nested version folder such as `artifactPath/v001`, then `v002`)
+  - includeHtml (optional, default true; downloads `htmlCode.downloadUrl` to `screen.html` when present)
+  - includeScreenshot (optional, default true; downloads `screenshot.downloadUrl` to `screenshot.*` when present)
+  - includeLinkedAssets (optional, default false; downloads safe HTTPS assets referenced by saved HTML into `assets/`)
+  - rewriteHtmlAssetUrls (optional, default false; rewrites saved HTML to point at downloaded local assets)
+  - maxLinkedAssets (optional, default 50, max 200)
+  - maxDownloadBytes (optional, default 26214400, max 104857600)
 
 9. stitch_create_project
 - MUTATING: creates a new Stitch project.
@@ -359,9 +366,14 @@ Partial lookup calls `list_screens` for the project, normalizes case and whitesp
 - `test-plan.md`: suggested unit, component, responsive, accessibility, and e2e test coverage.
 - `questions.md`: open questions and missing design/product details to resolve.
 - `manifest.json`: source ids, generated timestamp, artifact paths, caller input, fetch input, and resolver metadata.
+- `screen.html`: downloaded HTML artifact when `includeHtml` is true and `htmlCode.downloadUrl` is present.
+- `screenshot.*`: downloaded screenshot/thumbnail artifact when `includeScreenshot` is true and `screenshot.downloadUrl` is present.
+- `assets/`: downloaded linked HTML assets when `includeLinkedAssets` is true.
+- `asset-manifest.json`: download results for HTML, screenshot, and linked assets, including source URL, local path, content type, byte size, and skipped/failed reasons.
 
 The MCP response intentionally does not include raw JSON. It returns the bundle directory, artifact paths, and a short screen summary.
 Handoff files mark inferred items as inferred and avoid inventing precise design values when the Stitch payload does not include them.
+Linked asset download is intentionally conservative: only safe HTTPS URLs are downloaded, private/local hosts are skipped, and asset count/size limits are enforced.
 
 Output location rules:
 
@@ -369,6 +381,7 @@ Output location rules:
 - `relativePath` remains as a legacy alias for a caller-provided bundle directory, for example `exports/manual-screen`.
 - If no path is provided but `artifactName` is provided, the legacy fallback is `exports/{artifactName}`.
 - If neither `artifactPath` nor `artifactName` is provided, the default is `.artifacts/stitch/{normalized-screen-title-or-screen-id}`.
+- If `versioned` is true, the chosen path becomes the version base and the bundle is written into the next nested `v###` folder, for example `.artifacts/stitch/comment-section/v001`, then `v002`.
 - The base root is `PROJECT_ROOT` when set. If `PROJECT_ROOT` is not set, `STITCH_OUTPUT_DIR` remains the fallback/testing base.
 - Empty `PROJECT_ROOT` is treated as missing. A non-empty `PROJECT_ROOT` must already exist and be a directory; invalid roots are rejected instead of being created.
 - Absolute paths, `..`, suspicious path segments, symlink escapes, and paths outside the base root are rejected.

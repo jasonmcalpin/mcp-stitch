@@ -398,11 +398,16 @@ Keep this in your local Codex config if it contains a real API key.
 
 Mutating tools require `confirm: true`.
 
+`stitch_export_screen_artifact` can also download build handoff assets into the artifact bundle. By default it saves `screen.html` and `screenshot.*` when Stitch provides those URLs. Set `includeLinkedAssets: true` to download safe HTTPS assets referenced by the HTML into `assets/`, and `rewriteHtmlAssetUrls: true` to point the saved HTML at those local files.
+
+Set `versioned: true` to keep repeated exports or variations in nested folders such as `.artifacts/stitch/comment-section/v001`, then `v002`, while keeping each screen's assets together.
+
 ## Safety
 
 - Secrets are read from environment variables and are not printed by `stitch_status`.
 - `STITCH_API_BASE_URL` defaults to Google's Stitch MCP endpoint.
 - Artifact export paths are constrained to `PROJECT_ROOT` or `STITCH_OUTPUT_DIR`.
+- Linked asset export skips non-HTTPS and private/local hosts, and enforces count/size limits.
 - Mutating Stitch tools require `confirm: true`.
 
 Do not commit `.env`, generated artifact bundles, or Stitch output directories. This repo's `.gitignore` excludes the common local output paths.

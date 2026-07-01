@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { lstat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { getStitchConfig } from "../config/stitch.js";
@@ -28,6 +28,26 @@ const ARTIFACT_FILES = [
   "manifest.json",
 ] as const;
 const DEFAULT_ARTIFACT_ROOT = ".artifacts/stitch";
+const DEFAULT_MAX_LINKED_ASSETS = 50;
+const DEFAULT_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+const VERSION_DIR_PATTERN = /^v(\d{3})$/;
+
+type DownloadedAsset = {
+  kind: "html" | "screenshot" | "linked-asset";
+  sourceUrl: string;
+  path?: string | undefined;
+  relativePath?: string | undefined;
+  contentType?: string | undefined;
+  bytes?: number | undefined;
+  status: "saved" | "skipped" | "failed";
+  reason?: string | undefined;
+};
+
+type VersionInfo = {
+  enabled: boolean;
+  baseArtifactPath?: string;
+  version?: string;
+};
 
 type ComponentMapSection = {
   name: string;
@@ -69,6 +89,236 @@ function nowStamp(): string {
 
 function toPrettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function safeUrl(url: string): URL | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return null;
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      hostname.endsWith(".local") ||
+      hostname === "0.0.0.0" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+    ) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function extensionFromContentType(contentType?: string | null): string {
+  const normalized = contentType?.split(";")[0]?.trim().toLowerCase();
+  switch (normalized) {
+    case "text/html":
+      return ".html";
+    case "image/jpeg":
+      return ".jpg";
+    case "image/png":
+      return ".png";
+    case "image/webp":
+      return ".webp";
+    case "image/gif":
+      return ".gif";
+    case "image/svg+xml":
+      return ".svg";
+    case "image/avif":
+      return ".avif";
+    case "font/woff":
+      return ".woff";
+    case "font/woff2":
+      return ".woff2";
+    case "text/css":
+      return ".css";
+    case "application/javascript":
+    case "text/javascript":
+      return ".js";
+    default:
+      return ".bin";
+  }
+}
+
+function extensionFromUrl(url: URL): string {
+  const extension = path.extname(url.pathname).toLowerCase();
+  return /^[a-z0-9.]{2,12}$/.test(extension) ? extension : "";
+}
+
+function fileNameWithExtension(stem: string, url: URL, contentType?: string | null): string {
+  const extension = extensionFromUrl(url) || extensionFromContentType(contentType);
+  return `${stem}${extension}`;
+}
+
+function assetFileNameStem(prefix: string, index: number): string {
+  return `${prefix}-${String(index).padStart(3, "0")}`;
+}
+
+function dedupeUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const url of urls) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    result.push(url);
+  }
+
+  return result;
+}
+
+function extractLinkedAssetUrls(html: string, baseUrl: string): string[] {
+  const candidates: string[] = [];
+  const attrPattern = /\b(?:src|href)=["']([^"']+)["']/gi;
+  const cssUrlPattern = /url\(["']?([^"')]+)["']?\)/gi;
+
+  for (const match of html.matchAll(attrPattern)) {
+    if (match[1]) candidates.push(match[1]);
+  }
+
+  for (const match of html.matchAll(cssUrlPattern)) {
+    if (match[1]) candidates.push(match[1]);
+  }
+
+  const urls = candidates
+    .map((candidate) => {
+      try {
+        return new URL(candidate, baseUrl).toString();
+      } catch {
+        return null;
+      }
+    })
+    .filter((url): url is string => Boolean(url))
+    .filter((url) => safeUrl(url) !== null);
+
+  return dedupeUrls(urls);
+}
+
+function isLikelyLinkedAsset(contentType?: string | null): boolean {
+  const normalized = contentType?.split(";")[0]?.trim().toLowerCase();
+  return Boolean(
+    normalized &&
+      (normalized.startsWith("image/") ||
+        normalized.startsWith("font/") ||
+        normalized === "text/css" ||
+        normalized === "application/javascript" ||
+        normalized === "text/javascript")
+  );
+}
+
+async function downloadUrl(options: {
+  url: string;
+  baseRoot: string;
+  relativeDir: string;
+  fileNameStem: string;
+  forcedFileName?: string;
+  kind: DownloadedAsset["kind"];
+  maxBytes: number;
+  requireLinkedAssetType?: boolean;
+}): Promise<{ asset: DownloadedAsset; text?: string | undefined }> {
+  const parsed = safeUrl(options.url);
+  if (!parsed) {
+    return {
+      asset: {
+        kind: options.kind,
+        sourceUrl: options.url,
+        status: "skipped",
+        reason: "Only safe https URLs are downloaded.",
+      },
+    };
+  }
+
+  try {
+    const response = await fetch(parsed);
+    const contentType = response.headers.get("content-type") ?? undefined;
+    const contentLength = response.headers.get("content-length");
+
+    if (!response.ok) {
+      return {
+        asset: {
+          kind: options.kind,
+          sourceUrl: options.url,
+          contentType,
+          status: "failed",
+          reason: `HTTP ${response.status}`,
+        },
+      };
+    }
+
+    if (options.requireLinkedAssetType && !isLikelyLinkedAsset(contentType)) {
+      return {
+        asset: {
+          kind: options.kind,
+          sourceUrl: options.url,
+          contentType,
+          status: "skipped",
+          reason: "Response content type is not a linked asset type.",
+        },
+      };
+    }
+
+    if (contentLength && Number(contentLength) > options.maxBytes) {
+      return {
+        asset: {
+          kind: options.kind,
+          sourceUrl: options.url,
+          contentType,
+          status: "skipped",
+          reason: `Content length exceeds ${options.maxBytes} bytes.`,
+        },
+      };
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > options.maxBytes) {
+      return {
+        asset: {
+          kind: options.kind,
+          sourceUrl: options.url,
+          contentType,
+          bytes: arrayBuffer.byteLength,
+          status: "skipped",
+          reason: `Downloaded content exceeds ${options.maxBytes} bytes.`,
+        },
+      };
+    }
+
+    const buffer = Buffer.from(arrayBuffer);
+    const fileName = options.forcedFileName ?? fileNameWithExtension(options.fileNameStem, parsed, contentType);
+    const relativePath = path.join(options.relativeDir, fileName);
+    const outputPath = await prepareSafeOutputPath(options.baseRoot, relativePath);
+    await writeFile(outputPath, buffer);
+
+    return {
+      asset: {
+        kind: options.kind,
+        sourceUrl: options.url,
+        path: outputPath,
+        relativePath,
+        contentType,
+        bytes: buffer.byteLength,
+        status: "saved",
+      },
+      text: contentType?.startsWith("text/") ? buffer.toString("utf8") : undefined,
+    };
+  } catch (error) {
+    return {
+      asset: {
+        kind: options.kind,
+        sourceUrl: options.url,
+        status: "failed",
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
 }
 
 function defaultArtifactName(screenId?: string): string {
@@ -115,6 +365,33 @@ async function getBaseRoot(configOutputDir: string): Promise<OutputBaseRootResul
   }
 
   return { ok: true, baseRoot: path.resolve(configOutputDir), source: "STITCH_OUTPUT_DIR" };
+}
+
+async function nextVersionedArtifactPath(options: {
+  baseRoot: string;
+  artifactPath: string;
+}): Promise<{ artifactPath: string; version: string }> {
+  const basePath = await prepareSafeOutputPath(
+    options.baseRoot,
+    path.join(options.artifactPath, ".version-probe")
+  );
+  const versionBaseDir = path.dirname(basePath);
+  await mkdir(versionBaseDir, { recursive: true });
+
+  let maxVersion = 0;
+  const entries = await readdir(versionBaseDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const match = entry.name.match(VERSION_DIR_PATTERN);
+    if (!match?.[1]) continue;
+    maxVersion = Math.max(maxVersion, Number(match[1]));
+  }
+
+  const version = `v${String(maxVersion + 1).padStart(3, "0")}`;
+  return {
+    artifactPath: path.join(options.artifactPath, version),
+    version,
+  };
 }
 
 function defaultArtifactPath(payload: unknown, screenId?: string): string {
@@ -747,6 +1024,8 @@ function createManifest(options: {
   resolver?: unknown;
   generatedAt: string;
   paths: Record<string, string>;
+  downloadedAssets: DownloadedAsset[];
+  versionInfo: VersionInfo;
   artifactPath: string;
   resolvedOutputDir: string;
   baseRoot: string;
@@ -774,6 +1053,14 @@ function createManifest(options: {
       mode: options.outputMode,
     },
     paths: options.paths,
+    downloadedAssets: options.downloadedAssets,
+    version: options.versionInfo.enabled
+      ? {
+          enabled: true,
+          baseArtifactPath: options.versionInfo.baseArtifactPath,
+          version: options.versionInfo.version,
+        }
+      : { enabled: false },
   };
 }
 
@@ -816,9 +1103,63 @@ export function registerStitchExportTool(server: McpServer) {
           .describe("Legacy workspace-relative artifact bundle directory, for example exports/my-screen."),
         rawGetScreenInput: z.record(z.string(), z.unknown()).optional(),
         screenData: z.unknown().optional(),
+        versioned: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("When true, writes into the next nested version folder such as artifactPath/v001, then v002."),
+        includeHtml: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe("Download the screen htmlCode.downloadUrl into screen.html when present."),
+        includeScreenshot: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe("Download the screen screenshot.downloadUrl into screenshot.* when present."),
+        includeLinkedAssets: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("Download safe HTTPS assets referenced by the exported HTML into assets/."),
+        rewriteHtmlAssetUrls: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe("Rewrite saved screen.html to point at downloaded local asset files."),
+        maxLinkedAssets: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .default(DEFAULT_MAX_LINKED_ASSETS),
+        maxDownloadBytes: z
+          .number()
+          .int()
+          .min(1024)
+          .max(100 * 1024 * 1024)
+          .optional()
+          .default(DEFAULT_MAX_DOWNLOAD_BYTES),
       },
     },
-    async ({ screenId, projectId, artifactPath, artifactName, relativePath, rawGetScreenInput, screenData }) => {
+    async ({
+      screenId,
+      projectId,
+      artifactPath,
+      artifactName,
+      relativePath,
+      rawGetScreenInput,
+      screenData,
+      versioned = false,
+      includeHtml = true,
+      includeScreenshot = true,
+      includeLinkedAssets = false,
+      rewriteHtmlAssetUrls = false,
+      maxLinkedAssets = DEFAULT_MAX_LINKED_ASSETS,
+      maxDownloadBytes = DEFAULT_MAX_DOWNLOAD_BYTES,
+    }) => {
       if (!screenData && !screenId && !rawGetScreenInput) {
         return {
           content: [
@@ -930,12 +1271,40 @@ export function registerStitchExportTool(server: McpServer) {
 
       const outputMode: "artifactPath" | "artifactName" | "default" =
         artifactPath || relativePath ? "artifactPath" : artifactName ? "artifactName" : "default";
-      const relativeDir =
+      const baseRelativeDir =
         artifactPath ??
         relativePath ??
         (artifactName
           ? path.join("exports", sanitizeFileName(artifactName))
           : defaultArtifactPath(payload, screenId));
+      let relativeDir = baseRelativeDir;
+      let versionInfo: VersionInfo = { enabled: false };
+
+      if (versioned) {
+        try {
+          const versionedPath = await nextVersionedArtifactPath({
+            baseRoot: baseRootInfo.baseRoot,
+            artifactPath: baseRelativeDir,
+          });
+          relativeDir = versionedPath.artifactPath;
+          versionInfo = {
+            enabled: true,
+            baseArtifactPath: baseRelativeDir,
+            version: versionedPath.version,
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Invalid versioned output path.\n\n${message}`,
+              },
+            ],
+          };
+        }
+      }
+
       const outputPaths: Record<(typeof ARTIFACT_FILES)[number], string> = {
         "raw.json": "",
         "screen-summary.md": "",
@@ -983,6 +1352,122 @@ export function registerStitchExportTool(server: McpServer) {
         const acceptanceCriteria = buildAcceptanceCriteria(payload);
         const testPlan = buildTestPlan(payload);
         const questions = buildQuestions(payload);
+        const allOutputPaths: Record<string, string> = { ...outputPaths };
+        const downloadedAssets: DownloadedAsset[] = [];
+        const screen = getScreen(payload);
+        const htmlCode = getNestedRecord(screen, "htmlCode");
+        const screenshot = getNestedRecord(screen, "screenshot");
+        const htmlUrl = getString(htmlCode, "downloadUrl");
+        const screenshotUrl = getString(screenshot, "downloadUrl");
+        let savedHtmlPath: string | undefined;
+        let savedHtmlText: string | undefined;
+
+        if (includeHtml && htmlUrl) {
+          const htmlDownload = await downloadUrl({
+            url: htmlUrl,
+            baseRoot: baseRootInfo.baseRoot,
+            relativeDir,
+            fileNameStem: "screen",
+            forcedFileName: "screen.html",
+            kind: "html",
+            maxBytes: maxDownloadBytes,
+          });
+          downloadedAssets.push(htmlDownload.asset);
+
+          if (htmlDownload.asset.status === "saved") {
+            savedHtmlPath = htmlDownload.asset.path;
+            savedHtmlText = htmlDownload.text;
+            if (htmlDownload.asset.relativePath) {
+              allOutputPaths["screen.html"] = htmlDownload.asset.path ?? "";
+            }
+          }
+        }
+
+        if (includeScreenshot && screenshotUrl) {
+          const screenshotDownload = await downloadUrl({
+            url: screenshotUrl,
+            baseRoot: baseRootInfo.baseRoot,
+            relativeDir,
+            fileNameStem: "screenshot",
+            kind: "screenshot",
+            maxBytes: maxDownloadBytes,
+          });
+          downloadedAssets.push(screenshotDownload.asset);
+
+          if (screenshotDownload.asset.status === "saved" && screenshotDownload.asset.path) {
+            allOutputPaths[path.basename(screenshotDownload.asset.path)] = screenshotDownload.asset.path;
+          }
+        }
+
+        if (includeLinkedAssets && htmlUrl) {
+          if (!savedHtmlText) {
+            const htmlDownload = await downloadUrl({
+              url: htmlUrl,
+              baseRoot: baseRootInfo.baseRoot,
+              relativeDir,
+              fileNameStem: "screen",
+              forcedFileName: "screen.html",
+              kind: "html",
+              maxBytes: maxDownloadBytes,
+            });
+            downloadedAssets.push(htmlDownload.asset);
+
+            if (htmlDownload.asset.status === "saved") {
+              savedHtmlPath = htmlDownload.asset.path;
+              savedHtmlText = htmlDownload.text;
+              if (htmlDownload.asset.path) {
+                allOutputPaths["screen.html"] = htmlDownload.asset.path;
+              }
+            }
+          }
+
+          const linkedUrls = savedHtmlText
+            ? extractLinkedAssetUrls(savedHtmlText, htmlUrl).slice(0, maxLinkedAssets)
+            : [];
+          const rewriteMap = new Map<string, string>();
+
+          for (const [index, linkedUrl] of linkedUrls.entries()) {
+            const linkedAsset = await downloadUrl({
+              url: linkedUrl,
+              baseRoot: baseRootInfo.baseRoot,
+              relativeDir: path.join(relativeDir, "assets"),
+              fileNameStem: assetFileNameStem("asset", index + 1),
+              kind: "linked-asset",
+              maxBytes: maxDownloadBytes,
+              requireLinkedAssetType: true,
+            });
+            downloadedAssets.push(linkedAsset.asset);
+
+            if (linkedAsset.asset.status === "saved" && linkedAsset.asset.path) {
+              allOutputPaths[`assets/${path.basename(linkedAsset.asset.path)}`] = linkedAsset.asset.path;
+              if (savedHtmlPath) {
+                const localReference = path
+                  .relative(path.dirname(savedHtmlPath), linkedAsset.asset.path)
+                  .split(path.sep)
+                  .join("/");
+                rewriteMap.set(linkedUrl, localReference.startsWith(".") ? localReference : `./${localReference}`);
+              }
+            }
+          }
+
+          if (rewriteHtmlAssetUrls && savedHtmlPath && savedHtmlText && rewriteMap.size > 0) {
+            let rewrittenHtml = savedHtmlText;
+            for (const [remoteUrl, localReference] of rewriteMap) {
+              rewrittenHtml = rewrittenHtml.split(remoteUrl).join(localReference);
+            }
+            await writeFile(savedHtmlPath, rewrittenHtml, "utf8");
+          }
+        }
+
+        if (downloadedAssets.length > 0) {
+          const assetManifestPath = await prepareSafeOutputPath(
+            baseRootInfo.baseRoot,
+            path.join(relativeDir, "asset-manifest.json")
+          );
+          allOutputPaths["asset-manifest.json"] = assetManifestPath;
+          await writeFile(assetManifestPath, `${toPrettyJson({ generatedAt, assets: downloadedAssets })}\n`, "utf8");
+        }
+
         const manifest = createManifest({
           payload,
           input: {
@@ -994,10 +1479,19 @@ export function registerStitchExportTool(server: McpServer) {
             ...(rawGetScreenInput ? { rawGetScreenInput } : {}),
             ...(screenData ? { screenDataProvided: true } : {}),
             ...(fetchInput ? { fetchInput } : {}),
+            versioned,
+            includeHtml,
+            includeScreenshot,
+            includeLinkedAssets,
+            rewriteHtmlAssetUrls,
+            maxLinkedAssets,
+            maxDownloadBytes,
           },
           resolver: resolverInfo,
           generatedAt,
-          paths: outputPaths,
+          paths: allOutputPaths,
+          downloadedAssets,
+          versionInfo,
           artifactPath: relativeDir,
           resolvedOutputDir: path.dirname(outputPaths["manifest.json"]),
           baseRoot: baseRootInfo.baseRoot,
@@ -1018,9 +1512,11 @@ export function registerStitchExportTool(server: McpServer) {
         await writeFile(outputPaths["questions.md"], `${questions}\n`, "utf8");
         await writeFile(outputPaths["manifest.json"], `${toPrettyJson(manifest)}\n`, "utf8");
 
-        const screen = getScreen(payload);
         const title = getString(screen, "title") ?? "(untitled)";
         const screenName = getString(screen, "name") ?? "(unknown)";
+        const savedCount = downloadedAssets.filter((asset) => asset.status === "saved").length;
+        const skippedCount = downloadedAssets.filter((asset) => asset.status === "skipped").length;
+        const failedCount = downloadedAssets.filter((asset) => asset.status === "failed").length;
 
         return {
           content: [
@@ -1031,10 +1527,14 @@ export function registerStitchExportTool(server: McpServer) {
                 `Title: ${title}\n` +
                 `Screen: ${screenName}\n` +
                 `Artifact path: ${relativeDir}\n` +
+                (versionInfo.enabled
+                  ? `Version: ${versionInfo.version} (${versionInfo.baseArtifactPath})\n`
+                  : "") +
                 `Base root: ${baseRootInfo.baseRoot} (${baseRootInfo.source})\n` +
                 `Output directory: ${path.dirname(outputPaths["manifest.json"])}\n\n` +
+                `Downloaded assets: ${savedCount} saved, ${skippedCount} skipped, ${failedCount} failed\n\n` +
                 "Files:\n" +
-                ARTIFACT_FILES.map((fileName) => `- ${fileName}: ${outputPaths[fileName]}`).join("\n"),
+                Object.entries(allOutputPaths).map(([fileName, filePath]) => `- ${fileName}: ${filePath}`).join("\n"),
             },
           ],
         };
